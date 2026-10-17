@@ -10,17 +10,6 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Orders API")
 
-# Ensure CORS headers are applied to every response,
-# including 429 responses returned by the rate limiter.
-app = CORSMiddleware(
-    app=app,
-    allow_origins=["https://exam.sanand.workers.dev"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Retry-After"],
-)
-
 TOTAL_ORDERS = 60
 RATE_LIMIT = 17
 WINDOW_SECONDS = 10
@@ -47,7 +36,7 @@ class OrderCreate(BaseModel):
 
 @app.middleware("http")
 async def per_client_rate_limit(request: Request, call_next):
-    # Browser CORS preflight must not consume the quota.
+    # CORS preflight requests must not consume the quota.
     if request.method == "OPTIONS":
         return await call_next(request)
 
@@ -57,13 +46,16 @@ async def per_client_rate_limit(request: Request, call_next):
     with rate_lock:
         requests = client_requests[client_id]
 
+        # Remove requests outside the 10-second sliding window.
         while requests and now - requests[0] >= WINDOW_SECONDS:
             requests.popleft()
 
         if len(requests) >= RATE_LIMIT:
             retry_after = max(
-                1, int(WINDOW_SECONDS - (now - requests[0]) + 0.999)
+                1,
+                int(WINDOW_SECONDS - (now - requests[0]) + 0.999),
             )
+
             return Response(
                 content='{"detail":"Rate limit exceeded"}',
                 status_code=429,
@@ -130,3 +122,17 @@ def list_orders(
         "items": items,
         "next_cursor": next_cursor,
     }
+
+
+# IMPORTANT:
+# Wrap the completed FastAPI app with CORS LAST.
+# This ensures CORS headers are added even when rate limiting
+# returns a response before the route handler executes.
+app = CORSMiddleware(
+    app=app,
+    allow_origins=["https://exam.sanand.workers.dev"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Retry-After"],
+)
