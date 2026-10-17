@@ -10,8 +10,10 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Orders API")
 
-app.add_middleware(
-    CORSMiddleware,
+# Ensure CORS headers are applied to every response,
+# including 429 responses returned by the rate limiter.
+app = CORSMiddleware(
+    app=app,
     allow_origins=["https://exam.sanand.workers.dev"],
     allow_credentials=False,
     allow_methods=["*"],
